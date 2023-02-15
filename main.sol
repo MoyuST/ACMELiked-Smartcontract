@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.8.7;
+pragma solidity >=0.8.17;
 
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
@@ -64,7 +64,7 @@ contract ACMEDataFormat {
     struct ChallengeReq {
         uint256 orderIdx;
         uint256 authIdx;
-        ChallengeType challenType;
+        ChallengeType challengeType;
     }
 
 }
@@ -113,6 +113,7 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
 
     mapping(address => Account) public accounts;
     mapping(uint256 => ChallengeRequestRcds) public challengeRcds;
+    mapping(address => uint256) public funds;
 
     /*
      * Error
@@ -126,6 +127,7 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
     error NewOrderIdenNotSupported();
     error NewChallWithOrderNotProcessing();
     error NewChallWithAuthNotProcessing();
+    error NewChallWithUnsupportType();
     error IllegalAccountRequest();
     error invalidVRFRequestID();
 
@@ -134,6 +136,7 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
     event NewChallengeLog(address indexed _userAddress, string indexed _status, string _additinalInfo);
     event invalidVRFRequestIDLog(uint256 indexed  _requestID);
     event ChallengeReady(uint256 _requestID, string indexed _token);
+    event FundsUpdate(address _sender, uint256 _amount);
 
     modifier onlyOwner {
         require(msg.sender == owner);
@@ -265,40 +268,77 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
         }
     }
 
-    // accepting users' requests and responds
+    // user top off funds
     function onTokenTransfer(
-        address sender,
+        address _sender,
         uint256 _amount,
-        bytes calldata _data
+        bytes calldata // _data
     ) external override {
+        funds[_sender] += _amount;
+        emit FundsUpdate(_sender, funds[_sender]);
+    }
+
+    // user withdraw funds
+    function tokenWithdraw(uint256 _amount) external {
+        if(funds[msg.sender]>=_amount){
+            funds[msg.sender]-=_amount;
+            LinkTokenInterface LINK = LinkTokenInterface(linkAddress);
+            LINK.transfer(msg.sender, _amount);
+        }
+    }
+
+    function newChallenge(
+        uint256 orderIdx,
+        uint256 authIdx,
+        ChallengeType challengeType
+    ) external {
+        if(challengeType!=ChallengeType.http_01 && challengeType!=ChallengeType.dns_01){
+            revert NewChallWithUnsupportType();
+        }
+
         uint256 estimatedValue = VRF_V2_WRAPPER.calculateRequestPrice(_callbackGasLimit);
-        if (_amount < estimatedValue) {
+        if(funds[msg.sender] < estimatedValue) {
             revert NotEnoughTokenFee(estimatedValue);
         }
 
-        ChallengeReq memory chaReq = abi.decode(_data, (ChallengeReq));
-
-        if(accounts[sender].orders[chaReq.orderIdx].status!=Status.processing){
+        if(accounts[msg.sender].orders[orderIdx].status!=Status.processing){
             revert NewChallWithOrderNotProcessing();
         }
 
-        if(accounts[sender].orders[chaReq.orderIdx].authorizations[chaReq.authIdx].status!=Status.processing){
+        if(accounts[msg.sender].orders[orderIdx].authorizations[authIdx].status!=Status.processing){
             revert NewChallWithAuthNotProcessing();
         }
 
         uint256 requestId = requestRandomness(_callbackGasLimit, _requestConfirmations, _numWords);
-        accounts[sender].orders[chaReq.orderIdx].authorizations[chaReq.authIdx].challenges.push();
-        uint256 challIdx = accounts[sender].orders[chaReq.orderIdx].authorizations[chaReq.authIdx].challenges.length;
-        accounts[sender].orders[chaReq.orderIdx].authorizations[chaReq.authIdx].challenges[challIdx].challengeType
-            = chaReq.challenType;
-        accounts[sender].orders[chaReq.orderIdx].authorizations[chaReq.authIdx].challenges[challIdx].status
+        accounts[msg.sender].orders[orderIdx].authorizations[authIdx].challenges.push();
+        uint256 challIdx = accounts[msg.sender].orders[orderIdx].authorizations[authIdx].challenges.length;
+        accounts[msg.sender].orders[orderIdx].authorizations[authIdx].challenges[challIdx].challengeType
+            = challengeType;
+        accounts[msg.sender].orders[orderIdx].authorizations[authIdx].challenges[challIdx].status
             = Status.pending;
         
         challengeRcds[requestId].challIdx=challIdx;
-        challengeRcds[requestId].challReq=chaReq;
-        challengeRcds[requestId].requestAddr=sender;
+        challengeRcds[requestId].challReq.orderIdx=orderIdx;
+        challengeRcds[requestId].challReq.authIdx=authIdx;
+        challengeRcds[requestId].challReq.challengeType=challengeType;
+        challengeRcds[requestId].requestAddr=msg.sender;
         challengeRcds[requestId].valid=true;
+    }
 
+    function checkChallenge(
+        uint256 orderIdx,
+        uint256 authIdx,
+        ChallengeType challengeType
+    ) external {
+        if(accounts[msg.sender].orders[orderIdx].status!=Status.processing){
+            revert NewChallWithOrderNotProcessing();
+        }
+
+        if(accounts[msg.sender].orders[orderIdx].authorizations[authIdx].status!=Status.processing){
+            revert NewChallWithAuthNotProcessing();
+        }
+
+        
     }
 
     // update users challenge
