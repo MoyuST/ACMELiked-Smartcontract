@@ -4,6 +4,7 @@ pragma solidity >=0.8.17;
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/ERC677ReceiverInterface.sol";
+import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 
 contract ACMEDataFormat {
     enum Status {
@@ -66,23 +67,18 @@ contract ACMEDataFormat {
         uint256 authIdx;
         ChallengeType challengeType;
     }
-
 }
 
-contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677ReceiverInterface {
+contract ACMEError {
+    
+}
 
-    // "newNonce": "https://example.com/acme/new-nonce", // not needed, since blockchain has already avoid double spend problem
-    //  "newAccount": "https://example.com/acme/new-account",
-    //  "newOrder": "https://example.com/acme/new-order",
-    //  "newAuthz": "https://example.com/acme/new-authz", // needed or not depend on whether pre-authorization
-    //  "revokeCert": "https://example.com/acme/revoke-cert",
-    //  "keyChange": "https://example.com/acme/key-change", // not allowed, private key of the account is only source of secret
-    //  "meta": {
-    //    "termsOfService": "https://example.com/acme/terms/2017-5-30",
-    //    "website": "https://www.example.com/",
-    //    "caaIdentities": ["example.com"],
-    //    "externalAccountRequired": false
-    //  }
+contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677ReceiverInterface {
+    /*
+     * import
+     *
+     */
+    using Chainlink for Chainlink.Request;
 
     /*
      * struct
@@ -103,13 +99,14 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
     address linkAddress = 0x326C977E6efc84E512bB9C30f76E30c160eD06FB;
     // address WRAPPER - hardcoded for Goerli
     address wrapperAddress = 0x708701a1DfF4f478de54383E49a627eD4852C816;
-
-    string public termOfService;
-    bool public contractValid;
-    address public owner;
     uint16 public _requestConfirmations = 3; // default
     uint32 public _numWords = 1; // default
     uint32 public _callbackGasLimit = 100000;
+    uint256 public _challengeCheckFee = 100000000000000000;
+    
+    string public termOfService;
+    bool public contractValid;
+    address public owner;
 
     mapping(address => Account) public accounts;
     mapping(uint256 => ChallengeRequestRcds) public challengeRcds;
@@ -130,6 +127,9 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
     error NewChallWithUnsupportType();
     error IllegalAccountRequest();
     error invalidVRFRequestID();
+    error CheckChallWithOrderNotProcessing();
+    error CheckChallWithAuthNotProcessing();
+    error CheckChallNoEnoughFunds();
 
     event NewAccountLog(address indexed _userAddress, string indexed _additinalInfo);
     event NewOrderLog(address indexed _userAddress, uint256 indexed _curOrderIdx, uint256 _curIdenIdx);
@@ -162,6 +162,8 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
     constructor() VRFV2WrapperConsumerBase(linkAddress, wrapperAddress) {
         owner = msg.sender;
         contractValid = true;
+        setChainlinkToken(linkAddress);
+        setChainlinkOracle(0xCC79157eb46F5624204f47AB42b3906cAA40eaB7);
     }
 
     function deactivateContract() external onlyOwner onlyContractValid {
@@ -170,11 +172,12 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
 
     // register/update/delete account's infomation
     function newAccount(string[] memory contact, bool termOfServiceAgreed) external onlyContractValid {
+        Account storage ref = accounts[msg.sender];
         if(termOfServiceAgreed == true){
-            Status preStatus = accounts[msg.sender].status;
-            accounts[msg.sender].status = Status.valid;
-            accounts[msg.sender].contact = contact;
-            accounts[msg.sender].termOfServiceAgreed = true;
+            Status preStatus = ref.status;
+            ref.status = Status.valid;
+            ref.contact = contact;
+            ref.termOfServiceAgreed = true;
 
             if(preStatus==Status.valid){
                 emit NewAccountLog(msg.sender, "created");
@@ -186,7 +189,7 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
         else{
             // this means that once a user deactivate its account,
             // he cannot restore all his information, this is used for security
-            accounts[msg.sender].status = Status.invalid;
+            ref.status = Status.invalid;
             delete accounts[msg.sender];
             emit NewAccountLog(msg.sender, "deleted");
         }
@@ -254,6 +257,7 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
                 }
                 
                 accounts[msg.sender].orders[curOrderIdx].identifiers[curIdenIdx].value = string(result);
+                accounts[msg.sender].orders[curOrderIdx].authorizations[curIdenIdx].identifier.value = string(result);
                 accounts[msg.sender].orders[curOrderIdx].authorizations[curIdenIdx].status = Status.processing;
                 accounts[msg.sender].orders[curOrderIdx].authorizations[curIdenIdx].expires = block.timestamp + 604800;
                 accounts[msg.sender].orders[curOrderIdx].authorizations[curIdenIdx].identifier.value = string(result);
@@ -292,13 +296,13 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
         uint256 authIdx,
         ChallengeType challengeType
     ) external {
-        if(challengeType!=ChallengeType.http_01 && challengeType!=ChallengeType.dns_01){
-            revert NewChallWithUnsupportType();
-        }
-
         uint256 estimatedValue = VRF_V2_WRAPPER.calculateRequestPrice(_callbackGasLimit);
         if(funds[msg.sender] < estimatedValue) {
             revert NotEnoughTokenFee(estimatedValue);
+        }
+
+        if(challengeType!=ChallengeType.http_01 && challengeType!=ChallengeType.dns_01){
+            revert NewChallWithUnsupportType();
         }
 
         if(accounts[msg.sender].orders[orderIdx].status!=Status.processing){
@@ -328,18 +332,44 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
     function checkChallenge(
         uint256 orderIdx,
         uint256 authIdx,
+        uint256 challIdx,
         ChallengeType challengeType
     ) external {
+        if(funds[msg.sender]<_challengeCheckFee){
+            revert CheckChallNoEnoughFunds();
+        }
+
         if(accounts[msg.sender].orders[orderIdx].status!=Status.processing){
-            revert NewChallWithOrderNotProcessing();
+            revert CheckChallWithOrderNotProcessing();
         }
 
         if(accounts[msg.sender].orders[orderIdx].authorizations[authIdx].status!=Status.processing){
-            revert NewChallWithAuthNotProcessing();
+            revert CheckChallWithAuthNotProcessing();
         }
 
-        
+        string memory urlPre = accounts[msg.sender].orders[orderIdx].authorizations[authIdx].identifier.value;
+        string memory urlMid = "/acme-challenge/";
+        string memory urlSuf = accounts[msg.sender].orders[orderIdx].authorizations[authIdx].challenges[challIdx].token;
+
+        Chainlink.Request memory req = buildChainlinkRequest("7d80a6386ef543a3abb52817f6707e3b", address(this), this.fulfill.selector);
+        req.add(
+            "get",
+            string.concat(urlPre, urlMid, urlSuf)
+        );
+        req.add("path", "token");
+        sendChainlinkRequest(req, (1 * LINK_DIVISIBILITY) / 10); // 0,1*10**18 LINK
     }
+
+    // function request() public {
+    //     Chainlink.Request memory req = buildChainlinkRequest("7d80a6386ef543a3abb52817f6707e3b", address(this), this.fulfill.selector);
+    //     req.add(
+    //         "get",
+    //         "http://moyust.cc/acme-challenge/tttttttttttt"
+    //     );
+    //     req.add("path", "token");
+    //     sendChainlinkRequest(req, (1 * LINK_DIVISIBILITY) / 10); // 0,1*10**18 LINK
+    //     cnt = 45;
+    // }
 
     // update users challenge
     function fulfillRandomWords(uint256 _requestId, uint256[] memory _randomWords) internal override {
@@ -367,6 +397,8 @@ contract CertCoordinator is ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677Rece
         emit ChallengeReady(_requestId, token);
     }
 
-
+    function fulfill(bytes32 _requestId, string memory _id) public recordChainlinkFulfillment(_requestId) {
+    
+    }
 
 }
