@@ -68,6 +68,8 @@ contract ACMEDataFormat {
         uint256 notBefore;
         uint256 notAfter;
         string hash;
+        Status status;
+        address owner;
     }
 }
 
@@ -160,6 +162,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     event ChallStatus(address indexed _sender, uint256 indexed _orderIdx, uint256 indexed _authIdx, uint256  _challIdx, bool success);
     event OrderStatus(address indexed _sender, uint256 indexed _orderIdx, bool success);
     event NewCert(address indexed _sender, uint256 indexed _orderIdx, string _hash);
+    event RevokeCert(address indexed _sender, uint256 indexed  _certIdx, bool status);
 
     /*
      * modifier
@@ -513,14 +516,29 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
             revert OrderNotValid();
         }
 
+        if(curOrder.expires > block.timestamp){
+            revert OrderExpired(curOrder.expires);
+        }        
+
         Certificate storage curCert = CertRcds[requestCounter];
         curCert.expires = curOrder.expires;
         curCert.identifiers = curOrder.identifiers;
         curCert.notBefore = curOrder.notBefore;
         curCert.notAfter = curCert.notAfter;
         curCert.hash = hash;
+        curCert.status = Status.valid;
+        curCert.owner = msg.sender;
 
-        emit NewCert(msg.sender, orderIdx, hash);
+        emit NewCert(msg.sender, requestCounter++, hash);
+    }
+
+    function revokeCertificate(uint256 requestId) external {
+        bool status = false;
+        if(CertRcds[requestId].owner == msg.sender){
+            CertRcds[requestId].status = Status.invalid;
+            status = true;
+        }
+        emit RevokeCert(msg.sender, requestId, status);
     }
 
 }
