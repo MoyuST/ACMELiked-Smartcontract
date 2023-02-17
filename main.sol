@@ -135,16 +135,17 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
      */
     error VisitInvalidLog();
     error NotEnoughTokenFee(uint256 estimatedMinimumFee);
-    // error NewOrderInvaidOrderRange();
-    // error NewOrderRangeLargerThan7Days();
-    // error NewOderNumberOfOrdersExceed100000();
-    // error NewOrderIdenNotSupported();
+    error NewOrderInvaidOrderRange();
+    error NewOrderRangeLargerThan7Days();
+    error NewOderNumberOfOrdersExceed100000();
+    error NewOrderIdenNotSupported();
     error UnsupportChallType();
     error IllegalAccountRequest();
     error invalidVRFRequestID();
-    // error OrderNotProcessing();
-    // error AuthNotProcessing();
-
+    error OrderNotProcessing();
+    error AuthNotProcessing();
+    error OrderExpired(uint256 _expireTime);
+    error OrderNotValid();
     /*
      * event
      * provide some necessary information
@@ -245,9 +246,9 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         uint256 notAfter
     ) external onlyContractValid onlyRegisteredAccount{
         
-        if(notBefore>notAfter || notAfter-notBefore>604800 || identifiers.length > 100000){
-            revert();
-        }
+        // if(notBefore>notAfter || notAfter-notBefore>604800 || identifiers.length > 100000){
+        //     revert();
+        // }
 
         // can only handle identifier with type dns
         for(uint i=0; i<identifiers.length; ++i){
@@ -256,15 +257,15 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
             }
         }
 
-        // if(notBefore>notAfter){
-        //     revert NewOrderInvaidOrderRange();
-        // }
-        // if(notAfter-notBefore>604800){
-        //     revert NewOrderRangeLargerThan7Days();
-        // }
-        // if(identifiers.length > 100000){
-        //     revert NewOderNumberOfOrdersExceed100000();
-        // }
+        if(notBefore>notAfter){
+            revert NewOrderInvaidOrderRange();
+        }
+        if(notAfter-notBefore>604800){
+            revert NewOrderRangeLargerThan7Days();
+        }
+        if(identifiers.length > 100000){
+            revert NewOderNumberOfOrdersExceed100000();
+        }
 
         Account storage curAccount = accounts[msg.sender];
         curAccount.orders.push();
@@ -328,9 +329,9 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     function tokenWithdraw(uint256 _amount) external {
         if(funds[msg.sender]>=_amount){
             funds[msg.sender]-=_amount;
-            // LinkTokenInterface LINK = LinkTokenInterface(linkAddress);
-            // LINK.transfer(msg.sender, _amount);
-            LinkTokenInterface(linkAddress).transfer(msg.sender, _amount);
+            LinkTokenInterface LINK = LinkTokenInterface(linkAddress);
+            LINK.transfer(msg.sender, _amount);
+            // LinkTokenInterface(linkAddress).transfer(msg.sender, _amount);
         }
     }
 
@@ -351,13 +352,13 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         Order storage curOrder = accounts[msg.sender].orders[orderIdx];
         Authorization storage curAuth = curOrder.authorizations[authIdx];
 
-        if(curOrder.status!=Status.processing || curAuth.status!=Status.processing){
-            revert();
+        if(curOrder.status!=Status.processing){
+            revert OrderNotProcessing();
         }
 
-        // if(curAuth.status!=Status.processing){
-        //     revert AuthNotProcessing();
-        // }
+        if(curAuth.status!=Status.processing){
+            revert AuthNotProcessing();
+        }
 
         // deduct funds first to avoid reentrant attack
         funds[msg.sender] -= estimatedValue;
@@ -390,18 +391,18 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
             revert NotEnoughTokenFee(_challengeCheckFee);
         }
 
-        if(challengeType!=ChallengeType.http_01 || curOrder.status!=Status.processing || curAuth.status!=Status.processing){
-            revert();
+        if(challengeType!=ChallengeType.http_01){
+            revert UnsupportChallType();
         }
 
-        // if(curOrder.status!=Status.processing){
-        //     revert OrderNotProcessing();
-        // }
+        if(curOrder.status!=Status.processing){
+            revert OrderNotProcessing();
+        }
 
 
-        // if(curAuth.status!=Status.processing){
-        //     revert AuthNotProcessing();
-        // }
+        if(curAuth.status!=Status.processing){
+            revert AuthNotProcessing();
+        }
 
         // deduct funds first to avoid reentrant attack
         funds[msg.sender] -= _challengeCheckFee;
@@ -483,8 +484,12 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     function updateAuth(uint256 orderIdx) external {
         Order storage curOrder = accounts[msg.sender].orders[orderIdx];
 
-        if(curOrder.status!=Status.processing || curOrder.expires > block.timestamp){
-            revert();
+        if(curOrder.status!=Status.processing){
+            revert OrderNotProcessing();
+        }
+
+        if(curOrder.expires > block.timestamp){
+            revert OrderExpired(curOrder.expires);
         }
 
         bool allAuthPass = true;
@@ -505,7 +510,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     function setCertificate(uint256 orderIdx, string calldata hash) external {
         Order storage curOrder = accounts[msg.sender].orders[orderIdx];
         if(curOrder.status!=Status.valid){
-            revert ();
+            revert OrderNotValid();
         }
 
         Certificate storage curCert = CertRcds[requestCounter];
