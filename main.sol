@@ -61,10 +61,14 @@ contract ACMEDataFormat {
         string token;
         bool validated;
     }
-}
 
-contract ACMEError {
-    
+    struct Certificate {
+        uint256 expires;
+        Identifier[] identifiers; // content should be immutable
+        uint256 notBefore;
+        uint256 notAfter;
+        string hash;
+    }
 }
 
 contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677ReceiverInterface {
@@ -112,6 +116,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     uint32 public _numWords = 1; // default
     uint32 public _callbackGasLimit = 100000;
     uint256 public _challengeCheckFee = 100000000000000000;
+    uint256 public requestCounter = 0;
     
     string public termOfService;
     bool public contractValid;
@@ -121,6 +126,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     mapping(uint256 => ChallengeRequestRcd) public challengeRcds;
     mapping(address => uint256) public funds;
     mapping (bytes32 => CheckReq) public checkRcds;
+    mapping (uint256 => Certificate) public CertRcds;
 
     /*
      * error
@@ -129,18 +135,15 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
      */
     error VisitInvalidLog();
     error NotEnoughTokenFee(uint256 estimatedMinimumFee);
-    error NewOrderInvaidOrderRange();
-    error NewOrderRangeLargerThan7Days();
-    error NewOderNumberOfOrdersExceed100000();
-    error NewOrderIdenNotSupported();
-    error NewChallWithOrderNotProcessing();
-    error NewChallWithAuthNotProcessing();
-    error NewChallWithUnsupportType();
+    // error NewOrderInvaidOrderRange();
+    // error NewOrderRangeLargerThan7Days();
+    // error NewOderNumberOfOrdersExceed100000();
+    // error NewOrderIdenNotSupported();
+    error UnsupportChallType();
     error IllegalAccountRequest();
     error invalidVRFRequestID();
-    error CheckChallWithOrderNotProcessing();
-    error CheckChallWithAuthNotProcessing();
-    error CheckChallNoEnoughFunds(uint256 requiredMinimumFee);
+    // error OrderNotProcessing();
+    // error AuthNotProcessing();
 
     /*
      * event
@@ -151,9 +154,11 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     event NewOrderLog(address indexed _userAddress, uint256 indexed _curOrderIdx, uint256 _curIdenIdx);
     event NewChallengeLog(address indexed _userAddress, string indexed _status, string _additinalInfo);
     event invalidVRFRequestIDLog(uint256 indexed  _requestID);
-    event ChallengeReady(uint256 _requestID, string indexed _token);
-    event FundsUpdate(address _sender, uint256 _amount);
-    
+    event ChallengeReady(uint256 indexed _requestID, string indexed _token);
+    event FundsUpdate(address indexed _sender, uint256 indexed _amount);
+    event ChallStatus(address indexed _sender, uint256 indexed _orderIdx, uint256 indexed _authIdx, uint256  _challIdx, bool success);
+    event OrderStatus(address indexed _sender, uint256 indexed _orderIdx, bool success);
+    event NewCert(address indexed _sender, uint256 indexed _orderIdx, string _hash);
 
     /*
      * modifier
@@ -204,24 +209,24 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     function newAccount(string[] memory contact, bool termOfServiceAgreed) external onlyContractValid {
         Account storage ref = accounts[msg.sender];
         if(termOfServiceAgreed == true){
-            Status preStatus = ref.status;
+            // Status preStatus = ref.status;
             ref.status = Status.valid;
             ref.contact = contact;
             ref.termOfServiceAgreed = true;
 
-            if(preStatus==Status.valid){
-                emit NewAccountLog(msg.sender, "created");
-            }
-            else{
-                emit NewAccountLog(msg.sender, "updated");
-            }
+            // if(preStatus==Status.valid){
+            //     emit NewAccountLog(msg.sender, "created");
+            // }
+            // else{
+            emit NewAccountLog(msg.sender, "U");
+            // }
         }
         else{
             // this means that once a user deactivate its account,
             // he cannot restore all his information, this is used for security
             ref.status = Status.invalid;
             delete accounts[msg.sender];
-            emit NewAccountLog(msg.sender, "deleted");
+            emit NewAccountLog(msg.sender, "D");
         }
     }
 
@@ -239,16 +244,27 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         uint256 notBefore, 
         uint256 notAfter
     ) external onlyContractValid onlyRegisteredAccount{
+        
+        if(notBefore>notAfter || notAfter-notBefore>604800 || identifiers.length > 100000){
+            revert();
+        }
 
-        if(notBefore>notAfter){
-            revert NewOrderInvaidOrderRange();
+        // can only handle identifier with type dns
+        for(uint i=0; i<identifiers.length; ++i){
+            if(identifiers[i].identifierType!=IdentifierType.dns){
+                revert();
+            }
         }
-        if(notAfter-notBefore>604800){
-            revert NewOrderRangeLargerThan7Days();
-        }
-        if(identifiers.length > 100000){
-            revert NewOderNumberOfOrdersExceed100000();
-        }
+
+        // if(notBefore>notAfter){
+        //     revert NewOrderInvaidOrderRange();
+        // }
+        // if(notAfter-notBefore>604800){
+        //     revert NewOrderRangeLargerThan7Days();
+        // }
+        // if(identifiers.length > 100000){
+        //     revert NewOderNumberOfOrdersExceed100000();
+        // }
 
         Account storage curAccount = accounts[msg.sender];
         curAccount.orders.push();
@@ -259,51 +275,42 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         curOrder.notBefore = notBefore;
         curOrder.notAfter = notAfter;
 
-        // Identifier[] identifiers; // content should be immutable
-        // Authorization[] authorizations; // content should be immutable
-
         for(uint i=0; i<identifiers.length; ++i){
-            // can only handle identifier with type dns
-            if(identifiers[i].identifierType==IdentifierType.dns){
-                curOrder.identifiers.push();
-                curOrder.authorizations.push();
+            curOrder.identifiers.push();
+            curOrder.authorizations.push();
 
-                uint256 curIdenIdx = curOrder.identifiers.length - 1;
+            uint256 curIdenIdx = curOrder.identifiers.length - 1;
 
-                curOrder.identifiers[curIdenIdx].identifierType = IdentifierType.dns;
+            curOrder.identifiers[curIdenIdx].identifierType = IdentifierType.dns;
 
-                bytes memory strBytes = bytes(identifiers[i].value);
-                uint256 trimStartIdx = 0; // used to remove *. at the beginning of value
-                uint256 endIndex = strBytes.length;
-                bool wildCard = false;
+            bytes memory strBytes = bytes(identifiers[i].value);
+            uint256 trimStartIdx = 0; // used to remove *. at the beginning of value
+            uint256 endIndex = strBytes.length;
+            bool wildCard = false;
 
-                if(strBytes.length > 2 && strBytes[0]=='*' && strBytes[1]=='.'){
-                    wildCard = true;
-                    trimStartIdx+=2;
-                }
-                
-                bytes memory result = new bytes(endIndex-trimStartIdx);
-
-                for(uint j = trimStartIdx; j < endIndex; ++j) {
-                    result[i-trimStartIdx] = strBytes[j];
-                }
-                
-                curOrder.identifiers[curIdenIdx].value = string(result);
-
-                Authorization storage curAuth = curOrder.authorizations[curIdenIdx];
-
-                curAuth.identifier.value = string(result);
-                curAuth.status = Status.processing;
-                curAuth.expires = block.timestamp + 604800;
-                curAuth.identifier.value = string(result);
-                curAuth.identifier.identifierType = IdentifierType.dns;
-                curAuth.wildcard = wildCard;
-
-                emit NewOrderLog(msg.sender, curIdenIdx, curOrderIdx);
+            if(strBytes.length > 2 && strBytes[0]=='*' && strBytes[1]=='.'){
+                wildCard = true;
+                trimStartIdx+=2;
             }
-            else{
-                revert NewOrderIdenNotSupported();
+            
+            bytes memory result = new bytes(endIndex-trimStartIdx);
+
+            for(uint j = trimStartIdx; j < endIndex; ++j) {
+                result[i-trimStartIdx] = strBytes[j];
             }
+            
+            curOrder.identifiers[curIdenIdx].value = string(result);
+
+            Authorization storage curAuth = curOrder.authorizations[curIdenIdx];
+
+            curAuth.identifier.value = string(result);
+            curAuth.status = Status.processing;
+            curAuth.expires = block.timestamp + 604800;
+            curAuth.identifier.value = string(result);
+            curAuth.identifier.identifierType = IdentifierType.dns;
+            curAuth.wildcard = wildCard;
+
+            emit NewOrderLog(msg.sender, curIdenIdx, curOrderIdx);
         }
     }
 
@@ -321,8 +328,9 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     function tokenWithdraw(uint256 _amount) external {
         if(funds[msg.sender]>=_amount){
             funds[msg.sender]-=_amount;
-            LinkTokenInterface LINK = LinkTokenInterface(linkAddress);
-            LINK.transfer(msg.sender, _amount);
+            // LinkTokenInterface LINK = LinkTokenInterface(linkAddress);
+            // LINK.transfer(msg.sender, _amount);
+            LinkTokenInterface(linkAddress).transfer(msg.sender, _amount);
         }
     }
 
@@ -336,33 +344,30 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
             revert NotEnoughTokenFee(estimatedValue);
         }
 
-        // deduct funds first to avoid reentrant attack
-        funds[msg.sender] -= estimatedValue;
-        emit FundsUpdate(msg.sender, funds[msg.sender]);
-
         if(challengeType!=ChallengeType.http_01 && challengeType!=ChallengeType.dns_01){
-            revert NewChallWithUnsupportType();
+            revert UnsupportChallType();
         }
 
         Order storage curOrder = accounts[msg.sender].orders[orderIdx];
-
-        if(curOrder.status!=Status.processing){
-            revert NewChallWithOrderNotProcessing();
-        }
-
         Authorization storage curAuth = curOrder.authorizations[authIdx];
 
-        if(curAuth.status!=Status.processing){
-            revert NewChallWithAuthNotProcessing();
+        if(curOrder.status!=Status.processing || curAuth.status!=Status.processing){
+            revert();
         }
 
+        // if(curAuth.status!=Status.processing){
+        //     revert AuthNotProcessing();
+        // }
+
+        // deduct funds first to avoid reentrant attack
+        funds[msg.sender] -= estimatedValue;
+        emit FundsUpdate(msg.sender, funds[msg.sender]);
         uint256 requestId = requestRandomness(_callbackGasLimit, _requestConfirmations, _numWords);
         curAuth.challenges.push();
         uint256 challIdx = curAuth.challenges.length;
-        curAuth.challenges[challIdx].challengeType
-            = challengeType;
-        curAuth.challenges[challIdx].status
-            = Status.pending;
+        Challenge storage curChall = curAuth.challenges[challIdx];
+        curChall.challengeType = challengeType;
+        curChall.status = Status.pending;
         
         challengeRcds[requestId].challIdx=challIdx;
         challengeRcds[requestId].challReq.orderIdx=orderIdx;
@@ -378,28 +383,28 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         uint256 challIdx,
         ChallengeType challengeType
     ) external {
-        if(challengeType!=ChallengeType.http_01){
+        Order storage curOrder = accounts[msg.sender].orders[orderIdx];
+        Authorization storage curAuth = curOrder.authorizations[authIdx];
+
+        if(funds[msg.sender]<_challengeCheckFee){
+            revert NotEnoughTokenFee(_challengeCheckFee);
+        }
+
+        if(challengeType!=ChallengeType.http_01 || curOrder.status!=Status.processing || curAuth.status!=Status.processing){
             revert();
         }
 
-        if(funds[msg.sender]<_challengeCheckFee){
-            revert CheckChallNoEnoughFunds(_challengeCheckFee);
-        }
+        // if(curOrder.status!=Status.processing){
+        //     revert OrderNotProcessing();
+        // }
+
+
+        // if(curAuth.status!=Status.processing){
+        //     revert AuthNotProcessing();
+        // }
 
         // deduct funds first to avoid reentrant attack
         funds[msg.sender] -= _challengeCheckFee;
-
-        Order storage curOrder = accounts[msg.sender].orders[orderIdx];
-
-        if(curOrder.status!=Status.processing){
-            revert CheckChallWithOrderNotProcessing();
-        }
-
-        Authorization storage curAuth = curOrder.authorizations[authIdx];
-
-        if(curAuth.status!=Status.processing){
-            revert CheckChallWithAuthNotProcessing();
-        }
 
         string memory urlProtocal = "http://";
         string memory urlPre = curAuth.identifier.value;
@@ -421,6 +426,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         curRcd.token = urlSuf;
         curRcd.valid = true;
         curRcd.requestAddr = msg.sender;
+
     }
 
     // update users challenge
@@ -457,19 +463,59 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     function fulfill(bytes32 _requestId, string memory _token) public recordChainlinkFulfillment(_requestId) {
         if(checkRcds[_requestId].valid==true){
             string memory token = checkRcds[_requestId].token;
+            bool checkResult=false;
+            address userAddr = checkRcds[_requestId].requestAddr;
+            uint256 orderIdx = checkRcds[_requestId].orderIdx;
+            uint256 authIdx = checkRcds[_requestId].authIdx;
+            uint256 challIdx = checkRcds[_requestId].challIdx;
+            Authorization storage curAuth = accounts[userAddr].orders[orderIdx].authorizations[authIdx];
             
             if(keccak256(bytes(token)) == keccak256(bytes(_token))){
-                address userAddr = checkRcds[_requestId].requestAddr;
-                uint256 orderIdx = checkRcds[_requestId].orderIdx;
-                uint256 authIdx = checkRcds[_requestId].authIdx;
-                uint256 challIdx = checkRcds[_requestId].challIdx;
-
-                accounts[userAddr].orders[orderIdx].authorizations[authIdx].challenges[challIdx].validated=true;
+                curAuth.challenges[challIdx].validated=true;
+                curAuth.status = Status.valid;
+                checkResult = true;
             }
-            else{
 
+            emit ChallStatus(userAddr, orderIdx, authIdx, challIdx, checkResult);
+        }
+    }
+
+    function updateAuth(uint256 orderIdx) external {
+        Order storage curOrder = accounts[msg.sender].orders[orderIdx];
+
+        if(curOrder.status!=Status.processing || curOrder.expires > block.timestamp){
+            revert();
+        }
+
+        bool allAuthPass = true;
+        for(uint i=0;i<curOrder.authorizations.length;++i){
+            if(curOrder.authorizations[i].status!=Status.valid){
+                allAuthPass = false;
+                break;
             }
         }
+        
+        if(allAuthPass){
+            curOrder.status = Status.valid;
+        }
+
+        emit OrderStatus(msg.sender, orderIdx, allAuthPass);
+    }
+
+    function setCertificate(uint256 orderIdx, string calldata hash) external {
+        Order storage curOrder = accounts[msg.sender].orders[orderIdx];
+        if(curOrder.status!=Status.valid){
+            revert ();
+        }
+
+        Certificate storage curCert = CertRcds[requestCounter];
+        curCert.expires = curOrder.expires;
+        curCert.identifiers = curOrder.identifiers;
+        curCert.notBefore = curOrder.notBefore;
+        curCert.notAfter = curCert.notAfter;
+        curCert.hash = hash;
+
+        emit NewCert(msg.sender, orderIdx, hash);
     }
 
 }
