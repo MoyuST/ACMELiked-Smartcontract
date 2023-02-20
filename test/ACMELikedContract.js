@@ -49,4 +49,41 @@ describe("ACME-Likede Contract", function () {
         accountInfo = await CertCoordinator.connect(addr1).getUserInfo();
         expect(accountInfo["status"], "Account status should be invalid after deactivation").to.equal(0);
     });
+
+    it("New Order Test", async function () {
+        const {CertCoordinator, addr1} = await loadFixture(deployContractFixture);
+
+        // unregitried user should be reverted
+        await expect(CertCoordinator.connect(addr1).newOrder([[0, "test.com"]], 0, 604800), "unregitried user should be reverted")
+            .to.be.reverted;
+        
+        // status valid if registration with agreement of ToS
+        await expect(CertCoordinator.connect(addr1).newAccount(["sample@test.com", "sample2@test.com"], true),
+            "NewAccount event should be created")
+            .to.emit(CertCoordinator, "NewAccountLog").withArgs(addr1.address, "created");
+
+        // reverted because of unsupported identification type
+        await expect(CertCoordinator.connect(addr1).newOrder([[0, "test.com"], [1, "test2.com"]], 0, 604800), "unregitried user should be reverted")
+            .to.be.reverted;
+
+        // proper parameters should work
+        // await CertCoordinator.connect(addr1).newOrder([[0, "*.test.com"], [0, "test2.com"]], 0, 604800);
+
+        // used for log checking
+        let tx = await CertCoordinator.connect(addr1).newOrder([[0, "*.test.com"], [0, "test2.com"]], 0, 604800);
+        let receipt = await tx.wait();
+        let newOrderLogs = receipt["events"].filter(x => x["event"] === "NewOrderLog");
+        expect(newOrderLogs[0]["args"], "first event is inproper").to.eql([addr1.address, ethers.BigNumber.from(0), ethers.BigNumber.from(0)]);
+        expect(newOrderLogs[1]["args"], "second event is inproper").to.eql([addr1.address, ethers.BigNumber.from(0), ethers.BigNumber.from(1)]);
+
+        let rt = await CertCoordinator.connect(addr1).getUserInfo();
+        expect(rt["orders"][0]["identifiers"], "Identifier not valid").to.eql([
+            [0, "test.com"],
+            [0, "test2.com"],
+        ]);
+
+        expect(rt["orders"][0]["authorizations"][0]["wildcard"], "wildcard of *.test.com should be true").to.eql(true);
+        expect(rt["orders"][0]["authorizations"][1]["wildcard"], "wildcard of test2.com should be false").to.eql(false);
+
+    });
 });

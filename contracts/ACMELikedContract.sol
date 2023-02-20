@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.17;
 
+import "hardhat/console.sol";
+
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/ERC677ReceiverInterface.sol";
@@ -182,10 +184,10 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     }
 
     modifier onlyRegisteredAccount {
-        if(accounts[msg.sender].status == Status.valid){
+        if(accounts[msg.sender].status != Status.valid){
             revert IllegalAccountRequest();
         }
-        require(accounts[msg.sender].status == Status.valid);
+        // require(accounts[msg.sender].status == Status.valid);
         _;
     }
 
@@ -256,7 +258,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         // can only handle identifier with type dns
         for(uint i=0; i<identifiers.length; ++i){
             if(identifiers[i].identifierType!=IdentifierType.dns){
-                revert();
+                revert NewOrderIdenNotSupported();
             }
         }
 
@@ -279,6 +281,8 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         curOrder.notBefore = notBefore;
         curOrder.notAfter = notAfter;
 
+        // console.log(curOrderIdx, curOrder.expires);
+
         for(uint i=0; i<identifiers.length; ++i){
             curOrder.identifiers.push();
             curOrder.authorizations.push();
@@ -300,8 +304,10 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
             bytes memory result = new bytes(endIndex-trimStartIdx);
 
             for(uint j = trimStartIdx; j < endIndex; ++j) {
-                result[i-trimStartIdx] = strBytes[j];
+                result[j-trimStartIdx] = strBytes[j];
             }
+
+            // console.log(string(result));
             
             curOrder.identifiers[curIdenIdx].value = string(result);
 
@@ -314,7 +320,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
             curAuth.identifier.identifierType = IdentifierType.dns;
             curAuth.wildcard = wildCard;
 
-            emit NewOrderLog(msg.sender, curIdenIdx, curOrderIdx);
+            emit NewOrderLog(msg.sender, curOrderIdx, curIdenIdx);
         }
     }
 
