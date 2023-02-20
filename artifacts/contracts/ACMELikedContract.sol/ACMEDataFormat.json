@@ -1,0 +1,10 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "ACMEDataFormat",
+  "sourceName": "contracts/ACMELikedContract.sol",
+  "abi": [],
+  "bytecode": "0x6080604052348015600f57600080fd5b50603f80601d6000396000f3fe6080604052600080fdfea2646970667358221220104d5976c847cde5b2421de25c297010bf8b1aef0e3b75df82ce788d321b300464736f6c63430008110033",
+  "deployedBytecode": "0x6080604052600080fdfea2646970667358221220104d5976c847cde5b2421de25c297010bf8b1aef0e3b75df82ce788d321b300464736f6c63430008110033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}
