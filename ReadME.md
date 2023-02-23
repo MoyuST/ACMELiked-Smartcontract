@@ -87,7 +87,7 @@ JSON Web Signature (JWS)
 #### workflow overview:
 
 1. account registration:
-   
+```
     Client                                                   Server
 
     [Contact Information]
@@ -100,9 +100,9 @@ JSON Web Signature (JWS)
             [] Information covered by request signatures
 
                         Account Creation
-
+```
 2. certificate issuance:
-
+```
     Client                                                   Server
 
     [Order]
@@ -127,9 +127,9 @@ JSON Web Signature (JWS)
             [] Information covered by request signatures
 
                     Certificate Issuance
-
+```
 3. certificate revokation:
-
+```
     Client                                                 Server
 
     [Revocation request]
@@ -140,7 +140,7 @@ JSON Web Signature (JWS)
             [] Information covered by request signatures
 
                     Certificate Revocation
-
+```
 #### some notes
 HTTP requests (maybe only used for the challenge) involved must encoded using UTF-8.
 
