@@ -305,7 +305,8 @@ describe("ACME-Likeded Contract", function () {
                 ethers.BigNumber.from(0), 
                 "testhash", 
                 1,
-                addr1.address]);
+                addr1.address,
+                ethers.BigNumber.from(0)]);
         
     });
 

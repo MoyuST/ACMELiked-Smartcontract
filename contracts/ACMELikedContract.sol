@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.17;
 
-///////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////START//////////////////////////////////////
 import "hardhat/console.sol";
-///////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////END///////////////////////////////////////
 
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
@@ -74,6 +74,7 @@ contract ACMEDataFormat {
         string hash;
         Status status;
         address owner;
+        uint256 orderIdx;
     }
 }
 
@@ -339,13 +340,14 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         if(funds[msg.sender]>=_amount){
             funds[msg.sender]-=_amount;
 
-///////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////START//////////////////////////////////////
 /* igonre for testing
             LinkTokenInterface LINK = LinkTokenInterface(linkAddress);
             LINK.transfer(msg.sender, _amount);
             // LinkTokenInterface(linkAddress).transfer(msg.sender, _amount);
 */
-///////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////END///////////////////////////////////////
+
             emit FundsUpdate(msg.sender, funds[msg.sender]);
         }
         else{
@@ -359,13 +361,14 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         ChallengeType challengeType
     ) external onlyContractValid onlyRegisteredAccount {
 
-///////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////START//////////////////////////////////////
 /* ignore for testing
         uint256 estimatedValue = VRF_V2_WRAPPER.calculateRequestPrice(_callbackGasLimit);
 */
         /* testing only */
         uint256 estimatedValue = 2;
-///////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////END///////////////////////////////////////
+
 
         if(funds[msg.sender] < estimatedValue) {
             revert NotEnoughTokenFee(estimatedValue);
@@ -390,13 +393,14 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         funds[msg.sender] -= estimatedValue;
         emit FundsUpdate(msg.sender, funds[msg.sender]);
 
-///////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////START//////////////////////////////////////
     /* ignore for testing
         uint256 requestId = requestRandomness(_callbackGasLimit, _requestConfirmations, _numWords);
     */
         // only used for testing
         uint256 requestId = 1;
-///////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////END///////////////////////////////////////
+
 
         curAuth.challenges.push();
         uint256 challIdx = curAuth.challenges.length - 1;
@@ -460,13 +464,14 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         );
         req.add("path", "token");
 
-///////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////START//////////////////////////////////////
 /* ignore for testing
         sendChainlinkRequest(req, (1 * LINK_DIVISIBILITY) / 10); // 0,1*10**18 LINK
 */
     uint t = 2;
     req.id = bytes32(t);
-///////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////END///////////////////////////////////////
+
         
         CheckReq storage curRcd = checkRcds[req.id];
         curRcd.orderIdx = orderIdx;
@@ -478,7 +483,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
 
     }
 
-///////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////START//////////////////////////////////////
     function fulfillRandomWordsTest(
         uint256 _requestId, 
         uint256[] memory _randomWords
@@ -506,7 +511,8 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         }
     }
 
-///////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////END///////////////////////////////////////
+
 
     // update users challenge
     function fulfillRandomWords(
@@ -608,6 +614,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         curCert.hash = hash;
         curCert.status = Status.valid;
         curCert.owner = msg.sender;
+        curCert.orderIdx = orderIdx;
         curOrder.status=Status.valid;
 
         emit NewCert(msg.sender, requestCounter++, hash);
@@ -623,7 +630,6 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         else{
             revert RevokeCertNotValid();
         }
-        
     }
 
 }
