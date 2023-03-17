@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.17;
 
+/////////////////////////////////////START//////////////////////////////////////
+import "hardhat/console.sol";
+//////////////////////////////////////END///////////////////////////////////////
+
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/ERC677ReceiverInterface.sol";
 import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 
-contract ACMEDataFormat {
+contract ACMEDataFormat2 {
     enum Status {
         invalid,
         valid,
@@ -74,7 +78,7 @@ contract ACMEDataFormat {
     }
 }
 
-contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsumerBase, ERC677ReceiverInterface {
+contract CertCoordinator2 is ChainlinkClient, ACMEDataFormat2, VRFV2WrapperConsumerBase, ERC677ReceiverInterface {
     /*
      * import
      *
@@ -251,6 +255,10 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         uint256 notBefore, 
         uint256 notAfter
     ) external onlyContractValid onlyRegisteredAccount{
+        
+        // if(notBefore>notAfter || notAfter-notBefore>604800 || identifiers.length > 100000){
+        //     revert();
+        // }
 
         // can only handle identifier with type dns
         for(uint i=0; i<identifiers.length; ++i){
@@ -332,9 +340,13 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         if(funds[msg.sender]>=_amount){
             funds[msg.sender]-=_amount;
 
+/////////////////////////////////////START//////////////////////////////////////
+/* igonre for testing
             LinkTokenInterface LINK = LinkTokenInterface(linkAddress);
             LINK.transfer(msg.sender, _amount);
             // LinkTokenInterface(linkAddress).transfer(msg.sender, _amount);
+*/
+//////////////////////////////////////END///////////////////////////////////////
 
             emit FundsUpdate(msg.sender, funds[msg.sender]);
         }
@@ -349,8 +361,14 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         ChallengeType challengeType
     ) external onlyContractValid onlyRegisteredAccount {
 
-
+/////////////////////////////////////START//////////////////////////////////////
+/* ignore for testing
         uint256 estimatedValue = VRF_V2_WRAPPER.calculateRequestPrice(_callbackGasLimit);
+*/
+        /* testing only */
+        uint256 estimatedValue = 2;
+//////////////////////////////////////END///////////////////////////////////////
+
 
         if(funds[msg.sender] < estimatedValue) {
             revert NotEnoughTokenFee(estimatedValue);
@@ -375,7 +393,14 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         funds[msg.sender] -= estimatedValue;
         emit FundsUpdate(msg.sender, funds[msg.sender]);
 
+/////////////////////////////////////START//////////////////////////////////////
+    /* ignore for testing
         uint256 requestId = requestRandomness(_callbackGasLimit, _requestConfirmations, _numWords);
+    */
+        // only used for testing
+        uint256 requestId = 1;
+//////////////////////////////////////END///////////////////////////////////////
+
 
         curAuth.challenges.push();
         uint256 challIdx = curAuth.challenges.length - 1;
@@ -439,7 +464,14 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         );
         req.add("path", "token");
 
+/////////////////////////////////////START//////////////////////////////////////
+/* ignore for testing
         sendChainlinkRequest(req, (1 * LINK_DIVISIBILITY) / 10); // 0,1*10**18 LINK
+*/
+    uint t = 2;
+    req.id = bytes32(t);
+//////////////////////////////////////END///////////////////////////////////////
+
         
         CheckReq storage curRcd = checkRcds[req.id];
         curRcd.orderIdx = orderIdx;
@@ -450,6 +482,37 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         curRcd.requestAddr = msg.sender;
 
     }
+
+/////////////////////////////////////START//////////////////////////////////////
+    function fulfillRandomWordsTest(
+        uint256 _requestId, 
+        uint256[] memory _randomWords
+        ) external{
+            fulfillRandomWords(_requestId, _randomWords);
+    }
+
+    function fulfillTest(bytes32 _requestId, string memory _token) public onlyContractValid {
+        if(checkRcds[_requestId].valid==true){
+            string memory token = checkRcds[_requestId].token;
+            bool checkResult=false;
+            address userAddr = checkRcds[_requestId].requestAddr;
+            uint256 orderIdx = checkRcds[_requestId].orderIdx;
+            uint256 authIdx = checkRcds[_requestId].authIdx;
+            uint256 challIdx = checkRcds[_requestId].challIdx;
+            Authorization storage curAuth = accounts[userAddr].orders[orderIdx].authorizations[authIdx];
+            
+            if(keccak256(bytes(token)) == keccak256(bytes(_token))){
+                curAuth.challenges[challIdx].validated=true;
+                curAuth.status = Status.valid;
+                checkResult = true;
+            }
+
+            emit ChallStatus(userAddr, orderIdx, authIdx, challIdx, checkResult);
+        }
+    }
+
+//////////////////////////////////////END///////////////////////////////////////
+
 
     // update users challenge
     function fulfillRandomWords(

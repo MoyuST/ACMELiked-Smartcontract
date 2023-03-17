@@ -4,7 +4,7 @@ const { ethers } = require("hardhat");
 
 describe("ACME-Likeded Contract", function () {
     async function deployContractFixture() {
-        const CertCoordinatorFac = await ethers.getContractFactory("CertCoordinator");
+        const CertCoordinatorFac = await ethers.getContractFactory("CertCoordinator2");
         const [owner, addr1, addr2] = await ethers.getSigners();
 
         const CertCoordinator = await CertCoordinatorFac.deploy();
