@@ -98,6 +98,8 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         uint256 challIdx;
         string token;
         bool valid;
+        bool executed;
+        string _token;
     }
 
     struct ChallengeRequestRcd {
@@ -105,6 +107,8 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         uint256 challIdx;
         ChallengeReq challReq;
         bool valid;
+        uint256[] _randomWords;
+        bool executed;
     }
 
     /*
@@ -117,7 +121,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     address wrapperAddress = 0x708701a1DfF4f478de54383E49a627eD4852C816;
     uint16 public _requestConfirmations = 3; // default
     uint32 public _numWords = 1; // default
-    uint32 public _callbackGasLimit = 100000;
+    uint32 public _callbackGasLimit = 2000000;
     uint256 public _challengeCheckFee = 100000000000000000;
     uint256 public requestCounter = 0;
     
@@ -151,6 +155,11 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     error OrderExpired(uint256 _expireTime);
     error OrderNotValid();
     error RevokeCertNotValid();
+    error InvalidLINKContract();
+    error NewRequestNotOwn();
+    error NewRequestNotExecuted();
+    error CheckRequestNotOwn();
+    error CheckRequestNotExecuted();
     /*
      * event
      * provide some necessary information
@@ -165,8 +174,11 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     event ChallStatus(address indexed _sender, uint256 indexed _orderIdx, uint256 indexed _authIdx, uint256  _challIdx, bool success);
     event OrderStatus(address indexed _sender, uint256 indexed _orderIdx, bool success);
     event NewCert(address indexed _sender, uint256 indexed _orderIdx, string _hash);
-    event RevokeCert(address indexed _sender, uint256 indexed  _certIdx);
-
+    event RevokeCert(address indexed _sender, uint256 indexed _certIdx);
+    event NewReqCreated(address indexed _sender, uint256 indexed _requstid);
+    event NewRequestExecuted(uint256 indexed _requstid);
+    event CheckReqCreated(address indexed _sender, bytes32 indexed _requstid);
+    event CheckRequestExecuted(bytes32 indexed _requstid);
     /*
      * modifier
      *
@@ -189,6 +201,13 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
             revert IllegalAccountRequest();
         }
         // require(accounts[msg.sender].status == Status.valid);
+        _;
+    }
+
+    modifier onlyValidLINKContract {
+        if(msg.sender != linkAddress){
+            revert InvalidLINKContract();
+        }
         _;
     }
 
@@ -322,7 +341,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         address _sender,
         uint256 _amount,
         bytes calldata // _data
-    ) external override onlyContractValid {
+    ) external override onlyContractValid onlyValidLINKContract {
         funds[_sender] += _amount;
         emit FundsUpdate(_sender, funds[_sender]);
     }
@@ -385,12 +404,16 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         
         // no need to worry about concurrent execution of 2 functions
         // in the blockchain
-        challengeRcds[requestId].requestAddr=msg.sender;
-        challengeRcds[requestId].challIdx=challIdx;
-        challengeRcds[requestId].challReq.orderIdx=orderIdx;
-        challengeRcds[requestId].challReq.authIdx=authIdx;
-        challengeRcds[requestId].challReq.challengeType=challengeType;
-        challengeRcds[requestId].valid=true;
+        ChallengeRequestRcd storage curChallRcd = challengeRcds[requestId];
+        curChallRcd.requestAddr=msg.sender;
+        curChallRcd.challIdx=challIdx;
+        curChallRcd.challReq.orderIdx=orderIdx;
+        curChallRcd.challReq.authIdx=authIdx;
+        curChallRcd.challReq.challengeType=challengeType;
+        curChallRcd.valid=true;
+        curChallRcd.executed=false;
+
+        emit NewReqCreated(msg.sender, requestId);
     }
 
     function checkChallenge(
@@ -448,7 +471,8 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         curRcd.token = urlSuf;
         curRcd.valid = true;
         curRcd.requestAddr = msg.sender;
-
+        curRcd.executed = false;
+        emit CheckReqCreated(msg.sender, req.id);
     }
 
     // update users challenge
@@ -456,21 +480,54 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         uint256 _requestId, 
         uint256[] memory _randomWords
         ) internal override onlyContractValid {
-        if(challengeRcds[_requestId].valid==false){
+
+        ChallengeRequestRcd storage curChallRcd = challengeRcds[_requestId];
+
+        if(curChallRcd.valid==false){
             emit invalidVRFRequestIDLog(_requestId);
             revert invalidVRFRequestID();
         }
 
-        uint256 rt = _randomWords[0];
+        if(curChallRcd.executed==false){
+            curChallRcd._randomWords=_randomWords;
+            curChallRcd.executed=true;
 
-        bytes memory bytesArray = new bytes(32);
+            emit NewRequestExecuted(_requestId);
+        }
+    }
 
-        // make sure every char is readable
-        for(uint i=0; i<32;++i){
-            bytesArray[i] = bytes1(uint8(33 + (rt>>(8*i))%(126-33))); 
+    function fulfillRandomWordsProcessed(uint256 _requestId) external onlyContractValid {
+        ChallengeRequestRcd storage curChallRcd = challengeRcds[_requestId];
+
+        if(curChallRcd.requestAddr!=msg.sender){
+            revert NewRequestNotOwn();
         }
 
-        ChallengeRequestRcd storage curChallRcd = challengeRcds[_requestId];
+        if(curChallRcd.executed==false){
+            revert NewRequestNotExecuted();
+        }
+
+        uint256[] memory _randomWords = curChallRcd._randomWords;
+        bytes memory bytesArray = new bytes(32*_numWords);
+
+        // convert every char in the random string to only digits and letters
+        uint totalIdx = 0;
+        for(uint j=0;j<_numWords;++j){
+            uint256 rt = _randomWords[j];
+            for(uint i=0;i<32;++i){
+                uint8 curChar = uint8(rt>>(8*i));
+                if(curChar<21){ // 128 * 10 / 62 = 21 (interval for 0-9, totally 10 possible value)
+                    bytesArray[totalIdx] = bytes1(uint8(48 + curChar %(57-48))); 
+                }
+                else if(curChar<75){ // 128 * (10+26) / 62 = 21 (interval for A-Z, totally 26 possible value)
+                    bytesArray[totalIdx] = bytes1(uint8(65 + curChar %(90-65))); 
+                }
+                else{
+                    bytesArray[totalIdx] = bytes1(uint8(97 + curChar %(122-97))); 
+                }
+                ++totalIdx;
+            }
+        }
 
         address requestAddr = curChallRcd.requestAddr;
         uint256 orderIdx = curChallRcd.challReq.orderIdx;
@@ -486,23 +543,42 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     }
 
     function fulfill(bytes32 _requestId, string memory _token) public recordChainlinkFulfillment(_requestId) onlyContractValid {
-        if(checkRcds[_requestId].valid==true){
-            string memory token = checkRcds[_requestId].token;
-            bool checkResult=false;
-            address userAddr = checkRcds[_requestId].requestAddr;
-            uint256 orderIdx = checkRcds[_requestId].orderIdx;
-            uint256 authIdx = checkRcds[_requestId].authIdx;
-            uint256 challIdx = checkRcds[_requestId].challIdx;
-            Authorization storage curAuth = accounts[userAddr].orders[orderIdx].authorizations[authIdx];
-            
-            if(keccak256(bytes(token)) == keccak256(bytes(_token))){
-                curAuth.challenges[challIdx].validated=true;
-                curAuth.status = Status.valid;
-                checkResult = true;
-            }
+        CheckReq storage curRcd = checkRcds[_requestId];
+        if(curRcd.valid==true && curRcd.executed==false){
+            curRcd._token = _token;
+            curRcd.executed = true;
 
-            emit ChallStatus(userAddr, orderIdx, authIdx, challIdx, checkResult);
+            emit CheckRequestExecuted(_requestId);
         }
+    }
+
+    function fullfillProcessed(bytes32 _requestId) external onlyContractValid {
+        CheckReq storage curRcd = checkRcds[_requestId];
+
+        if(curRcd.requestAddr!=msg.sender){
+            revert CheckRequestNotOwn();
+        }
+
+        if(curRcd.executed==false){
+            revert CheckRequestNotExecuted();
+        }
+
+        string memory token = curRcd.token;
+        string memory _token = curRcd._token;
+        bool checkResult=false;
+        address userAddr = curRcd.requestAddr;
+        uint256 orderIdx = curRcd.orderIdx;
+        uint256 authIdx = curRcd.authIdx;
+        uint256 challIdx = curRcd.challIdx;
+        Authorization storage curAuth = accounts[userAddr].orders[orderIdx].authorizations[authIdx];
+        
+        if(keccak256(bytes(token)) == keccak256(bytes(_token))){
+            curAuth.challenges[challIdx].validated=true;
+            curAuth.status = Status.valid;
+            checkResult = true;
+        }
+
+        emit ChallStatus(userAddr, orderIdx, authIdx, challIdx, checkResult);
     }
 
     function updateAuth(uint256 orderIdx) external onlyContractValid onlyRegisteredAccount {
