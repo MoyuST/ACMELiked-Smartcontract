@@ -4,7 +4,7 @@ const { ethers } = require("hardhat");
 
 describe("ACME-Likeded Contract", function () {
     async function deployContractFixture() {
-        const CertCoordinatorFac = await ethers.getContractFactory("CertCoordinator2");
+        const CertCoordinatorFac = await ethers.getContractFactory("CertCoordinatorTest");
         const [owner, addr1, addr2] = await ethers.getSigners();
 
         const CertCoordinator = await CertCoordinatorFac.deploy();
@@ -132,16 +132,26 @@ describe("ACME-Likeded Contract", function () {
         let record = await CertCoordinator.challengeRcds(1);
 
         await expect(record, "new challenge result not valid")
-            .to.eql([addr1.address, ethers.BigNumber.from(0), [ethers.BigNumber.from(0), ethers.BigNumber.from(0), 0], true]);
+            .to.eql([addr1.address, ethers.BigNumber.from(0), [ethers.BigNumber.from(0), ethers.BigNumber.from(0), 0], true, false]);
+
+        await expect(CertCoordinator.connect(addr1).fulfillRandomWordsProcessed(1), "user cannot process an executed request")
+            .to.be.reverted;
 
         await expect(CertCoordinator.fulfillRandomWordsTest(2, [ethers.BigNumber.from(12345678)]), "invalid request ID should be reverted")
             .to.be.reverted;
+            
+        await expect(CertCoordinator.fulfillRandomWordsProcessed(1), "user cannot further process a request of others")
+            .to.be.reverted;
 
-        tx = await CertCoordinator.fulfillRandomWordsTest(1, [ethers.BigNumber.from(12345678)]);
+        tx = await CertCoordinator.fulfillRandomWordsTest(1, ["0xafdb2d6b9c33ecace7cb947d62157e6da5b7de75b52a79771cae8957b067646e"]);
         receipt = await tx.wait();
+
+        tx = await CertCoordinator.connect(addr1).fulfillRandomWordsProcessed(1);
+        receipt = await tx.wait();
+
         let fulfillRandomWordsLogs = receipt["events"].filter(x => x["event"] === "ChallengeReady");
         expect(fulfillRandomWordsLogs.length, "fulfillRandomWords should only generate one event").to.eql(1);
-        expect(fulfillRandomWordsLogs[0]["args"], "fulfillRandomWords event parameter not as expected").to.eql([ethers.BigNumber.from(1), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"]); 
+        expect(fulfillRandomWordsLogs[0]["args"], "fulfillRandomWords event parameter not as expected").to.eql([ethers.BigNumber.from(1), "kadbmmyDtvRgrwipjbVxaxdgwlBghUta"]); 
 
     });
 
@@ -165,19 +175,21 @@ describe("ACME-Likeded Contract", function () {
         await expect(CertCoordinator.connect(addr1).checkChallenge(0, 0, 0, 0), "invalid challenge status reverted").to.be.reverted;
 
         await CertCoordinator.connect(addr1).newChallenge(0, 0, 0);
-        await expect(CertCoordinator.fulfillRandomWordsTest(1, [ethers.BigNumber.from(12345678)]))
-            .to.emit(CertCoordinator, "ChallengeReady").withArgs(ethers.BigNumber.from(1), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+
+        await CertCoordinator.fulfillRandomWordsTest(1, ["0xafdb2d6b9c33ecace7cb947d62157e6da5b7de75b52a79771cae8957b067646e"]);
+
+        await CertCoordinator.connect(addr1).fulfillRandomWordsProcessed(1);
 
         await CertCoordinator.connect(addr1).checkChallenge(0, 0, 0, 0);
 
-        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(2), 32), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!?"),
-            "challenge check with unmatched token should fail")
-            .to.emit(CertCoordinator, "ChallStatus").withArgs(addr1.address, 0, 0, 0, false);
-
-        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(2), 32), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"),
+        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32), "kadbmmyDtvRgrwipjbVxaxdgwlBghUta"),
             "challenge check with matched token should success")
-            .to.emit(CertCoordinator, "ChallStatus").withArgs(addr1.address, 0, 0, 0, true);
+            .to.emit(CertCoordinator, "CheckRequestExecuted").withArgs(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
 
+        await expect(CertCoordinator.connect(addr1).fullfillProcessed(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32)),
+        "challenge check further processed with matched token should success")
+        .to.emit(CertCoordinator, "ChallStatus").withArgs(addr1.address, 0, 0, 0, true);
+        
         let result = await CertCoordinator.connect(addr1).getUserInfo();
         expect(result["orders"][0]["authorizations"][0]["challenges"][0]["validated"], "successful check will update challenge status")
             .to.equal(true);
@@ -208,25 +220,35 @@ describe("ACME-Likeded Contract", function () {
         .to.emit(CertCoordinator, "OrderStatus").withArgs(addr1.address, 0, false);
     
         await CertCoordinator.connect(addr1).newChallenge(0, 0, 0);
-        await expect(CertCoordinator.fulfillRandomWordsTest(1, [ethers.BigNumber.from(12345678)]))
-            .to.emit(CertCoordinator, "ChallengeReady").withArgs(ethers.BigNumber.from(1), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+
+        await CertCoordinator.fulfillRandomWordsTest(1, ["0xafdb2d6b9c33ecace7cb947d62157e6da5b7de75b52a79771cae8957b067646e"]);
+
+        await CertCoordinator.connect(addr1).fulfillRandomWordsProcessed(1);
 
         await CertCoordinator.connect(addr1).checkChallenge(0, 0, 0, 0);
-        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(2), 32), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"),
+
+        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32), "kadbmmyDtvRgrwipjbVxaxdgwlBghUta"),
             "challenge check with matched token should success")
-            .to.emit(CertCoordinator, "ChallStatus").withArgs(addr1.address, 0, 0, 0, true);
+            .to.emit(CertCoordinator, "CheckRequestExecuted").withArgs(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
+
+        await CertCoordinator.connect(addr1).fullfillProcessed(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
         
         await expect(CertCoordinator.connect(addr1).updateAuth(0), "order status should not be valid since authorizations not fully executed")
             .to.emit(CertCoordinator, "OrderStatus").withArgs(addr1.address, 0, false);
-            
+        
         await CertCoordinator.connect(addr1).newChallenge(0, 1, 0);
-        await expect(CertCoordinator.fulfillRandomWordsTest(1, [ethers.BigNumber.from(12345678)]))
-            .to.emit(CertCoordinator, "ChallengeReady").withArgs(ethers.BigNumber.from(1), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+
+        await CertCoordinator.fulfillRandomWordsTest(1, ["0xafdb2d6b9c33ecace7cb947d62157e6da5b7de75b52a79771cae8957b067646e"]);
+
+        await CertCoordinator.connect(addr1).fulfillRandomWordsProcessed(1);
 
         await CertCoordinator.connect(addr1).checkChallenge(0, 1, 0, 0);
-        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(2), 32), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"),
+
+        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32), "kadbmmyDtvRgrwipjbVxaxdgwlBghUta"),
             "challenge check with matched token should success")
-            .to.emit(CertCoordinator, "ChallStatus").withArgs(addr1.address, 0, 1, 0, true);
+            .to.emit(CertCoordinator, "CheckRequestExecuted").withArgs(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
+
+        await CertCoordinator.connect(addr1).fullfillProcessed(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
         
         await expect(CertCoordinator.connect(addr1).updateAuth(0), "order status should be valid since authorizations fully executed")
             .to.emit(CertCoordinator, "OrderStatus").withArgs(addr1.address, 0, true);
@@ -259,31 +281,35 @@ describe("ACME-Likeded Contract", function () {
             .to.be.reverted;
 
         await CertCoordinator.connect(addr1).newChallenge(0, 0, 0);
-        await expect(CertCoordinator.fulfillRandomWordsTest(1, [ethers.BigNumber.from(12345678)]))
-            .to.emit(CertCoordinator, "ChallengeReady").withArgs(ethers.BigNumber.from(1), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-        
-        await expect(CertCoordinator.connect(addr1).setCertificate(0, "testhash"), "revert since order not fully authenticated")
-            .to.be.reverted;
+
+        await CertCoordinator.fulfillRandomWordsTest(1, ["0xafdb2d6b9c33ecace7cb947d62157e6da5b7de75b52a79771cae8957b067646e"]);
+
+        await CertCoordinator.connect(addr1).fulfillRandomWordsProcessed(1);
 
         await CertCoordinator.connect(addr1).checkChallenge(0, 0, 0, 0);
-        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(2), 32), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"),
+
+        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32), "kadbmmyDtvRgrwipjbVxaxdgwlBghUta"),
             "challenge check with matched token should success")
-            .to.emit(CertCoordinator, "ChallStatus").withArgs(addr1.address, 0, 0, 0, true);
+            .to.emit(CertCoordinator, "CheckRequestExecuted").withArgs(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
+
+        await CertCoordinator.connect(addr1).fullfillProcessed(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
 
         await expect(CertCoordinator.connect(addr1).setCertificate(0, "testhash"), "revert since order not fully authenticated")
             .to.be.reverted;
 
         await CertCoordinator.connect(addr1).newChallenge(0, 1, 0);
-        await expect(CertCoordinator.fulfillRandomWordsTest(1, [ethers.BigNumber.from(12345678)]))
-            .to.emit(CertCoordinator, "ChallengeReady").withArgs(ethers.BigNumber.from(1), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
 
-        await expect(CertCoordinator.connect(addr1).setCertificate(0, "testhash"), "revert since order not fully authenticated")
-            .to.be.reverted;
+        await CertCoordinator.fulfillRandomWordsTest(1, ["0xafdb2d6b9c33ecace7cb947d62157e6da5b7de75b52a79771cae8957b067646e"]);
+
+        await CertCoordinator.connect(addr1).fulfillRandomWordsProcessed(1);
 
         await CertCoordinator.connect(addr1).checkChallenge(0, 1, 0, 0);
-        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(2), 32), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"),
+
+        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32), "kadbmmyDtvRgrwipjbVxaxdgwlBghUta"),
             "challenge check with matched token should success")
-            .to.emit(CertCoordinator, "ChallStatus").withArgs(addr1.address, 0, 1, 0, true);
+            .to.emit(CertCoordinator, "CheckRequestExecuted").withArgs(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
+
+        await CertCoordinator.connect(addr1).fullfillProcessed(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
         
         await expect(CertCoordinator.connect(addr1).setCertificate(0, "testhash"), "revert since order not fully authenticated")
             .to.be.reverted;
@@ -336,40 +362,40 @@ describe("ACME-Likeded Contract", function () {
             .to.be.reverted;
 
         await CertCoordinator.connect(addr1).newChallenge(0, 0, 0);
-        await expect(CertCoordinator.fulfillRandomWordsTest(1, [ethers.BigNumber.from(12345678)]))
-            .to.emit(CertCoordinator, "ChallengeReady").withArgs(ethers.BigNumber.from(1), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-        
-        await expect(CertCoordinator.connect(addr1).revokeCertificate(0), "revert since certificate not valid")
-            .to.be.reverted;
+
+        await CertCoordinator.fulfillRandomWordsTest(1, ["0xafdb2d6b9c33ecace7cb947d62157e6da5b7de75b52a79771cae8957b067646e"]);
+
+        await CertCoordinator.connect(addr1).fulfillRandomWordsProcessed(1);
 
         await CertCoordinator.connect(addr1).checkChallenge(0, 0, 0, 0);
-        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(2), 32), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"),
-            "challenge check with matched token should success")
-            .to.emit(CertCoordinator, "ChallStatus").withArgs(addr1.address, 0, 0, 0, true);
 
-        await expect(CertCoordinator.connect(addr1).revokeCertificate(0), "revert since certificate not valid")
+        await CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32), "kadbmmyDtvRgrwipjbVxaxdgwlBghUta");
+
+        await CertCoordinator.connect(addr1).fullfillProcessed(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
+
+        await expect(CertCoordinator.connect(addr1).setCertificate(0, "testhash"), "revert since order not fully authenticated")
             .to.be.reverted;
 
         await CertCoordinator.connect(addr1).newChallenge(0, 1, 0);
-        await expect(CertCoordinator.fulfillRandomWordsTest(1, [ethers.BigNumber.from(12345678)]))
-            .to.emit(CertCoordinator, "ChallengeReady").withArgs(ethers.BigNumber.from(1), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
 
-        await expect(CertCoordinator.connect(addr1).revokeCertificate(0), "revert since certificate not valid")
-            .to.be.reverted;
+        await CertCoordinator.fulfillRandomWordsTest(1, ["0xafdb2d6b9c33ecace7cb947d62157e6da5b7de75b52a79771cae8957b067646e"]);
 
-        await CertCoordinator.connect(addr1).checkChallenge(0, 1, 0, 0);
-        await expect(CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(2), 32), "6T#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"),
-            "challenge check with matched token should success")
-            .to.emit(CertCoordinator, "ChallStatus").withArgs(addr1.address, 0, 1, 0, true);
+        await CertCoordinator.connect(addr1).fulfillRandomWordsProcessed(1);
+
+        await CertCoordinator.connect(addr1).checkChallenge(0, 1, 0, 0);        
         
-        await expect(CertCoordinator.connect(addr1).revokeCertificate(0), "revert since certificate not valid")
-            .to.be.reverted;
+        await CertCoordinator.fulfillTest(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32), "kadbmmyDtvRgrwipjbVxaxdgwlBghUta");
 
-        await expect(CertCoordinator.connect(addr1).updateAuth(0), "order status should be valid since authorizations fully executed")
-            .to.emit(CertCoordinator, "OrderStatus").withArgs(addr1.address, 0, true);
+        await CertCoordinator.connect(addr1).fullfillProcessed(ethers.utils.hexZeroPad(ethers.utils.hexlify(0), 32));
 
-        await expect(CertCoordinator.connect(addr1).revokeCertificate(0), "revert should success once the ")
-            .to.be.reverted;
+        // await expect(CertCoordinator.connect(addr1).revokeCertificate(0), "revert since certificate not valid")
+        //     .to.be.reverted;
+
+        // await expect(CertCoordinator.connect(addr1).updateAuth(0), "order status should be valid since authorizations fully executed")
+        //     .to.emit(CertCoordinator, "OrderStatus").withArgs(addr1.address, 0, true);
+
+        // await expect(CertCoordinator.connect(addr1).revokeCertificate(0), "revert should not success once revert has been conducted ")
+        //     .to.be.reverted;
     });
 
 

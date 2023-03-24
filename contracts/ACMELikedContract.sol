@@ -148,7 +148,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     error NewOrderIdenNotSupported();
     error UnsupportChallType();
     error IllegalAccountRequest();
-    error invalidVRFRequestID();
+    error InvalidVRFRequestID();
     error OrderNotProcessing();
     error AuthNotProcessing();
     error ChallNotReady();
@@ -168,7 +168,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     event NewAccountLog(address indexed _userAddress, string indexed _additinalInfo);
     event NewOrderLog(address indexed _userAddress, uint256 indexed _curOrderIdx, uint256 _curIdenIdx);
     event NewChallengeLog(address indexed _userAddress, string indexed _status, string _additinalInfo);
-    event invalidVRFRequestIDLog(uint256 indexed  _requestID);
+    event InvalidVRFRequestIDLog(uint256 indexed  _requestID);
     event ChallengeReady(uint256 indexed _requestID, string _token);
     event FundsUpdate(address indexed _sender, uint256 indexed _amount);
     event ChallStatus(address indexed _sender, uint256 indexed _orderIdx, uint256 indexed _authIdx, uint256  _challIdx, bool success);
@@ -484,8 +484,8 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         ChallengeRequestRcd storage curChallRcd = challengeRcds[_requestId];
 
         if(curChallRcd.valid==false){
-            emit invalidVRFRequestIDLog(_requestId);
-            revert invalidVRFRequestID();
+            emit InvalidVRFRequestIDLog(_requestId);
+            revert InvalidVRFRequestID();
         }
 
         if(curChallRcd.executed==false){
