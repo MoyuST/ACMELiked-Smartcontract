@@ -462,9 +462,9 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         );
         req.add("path", "token");
 
-        sendChainlinkRequest(req, (1 * LINK_DIVISIBILITY) / 10); // 0,1*10**18 LINK
+        bytes32 request_id = sendChainlinkRequest(req, (1 * LINK_DIVISIBILITY) / 10); // 0,1*10**18 LINK
         
-        CheckReq storage curRcd = checkRcds[req.id];
+        CheckReq storage curRcd = checkRcds[request_id];
         curRcd.orderIdx = orderIdx;
         curRcd.authIdx = authIdx;
         curRcd.challIdx = challIdx;
@@ -472,7 +472,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         curRcd.valid = true;
         curRcd.requestAddr = msg.sender;
         curRcd.executed = false;
-        emit CheckReqCreated(msg.sender, req.id);
+        emit CheckReqCreated(msg.sender, request_id);
     }
 
     // update users challenge
