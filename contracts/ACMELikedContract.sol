@@ -131,7 +131,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
 
     mapping(address => Account) public accounts;
     mapping(uint256 => ChallengeRequestRcd) public challengeRcds;
-    mapping(address => uint256) public funds;
+    mapping(address => uint256) private funds;
     mapping (bytes32 => CheckReq) public checkRcds;
     mapping (uint256 => Certificate) public CertRcds;
 
@@ -173,7 +173,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     event FundsUpdate(address indexed _sender, uint256 indexed _amount);
     event ChallStatus(address indexed _sender, uint256 indexed _orderIdx, uint256 indexed _authIdx, uint256  _challIdx, bool success);
     event OrderStatus(address indexed _sender, uint256 indexed _orderIdx, bool success);
-    event NewCert(address indexed _sender, uint256 indexed _orderIdx, string _hash);
+    event NewCert(address indexed _sender, uint256 indexed _certIdx, string _hash);
     event RevokeCert(address indexed _sender, uint256 indexed _certIdx);
     event NewReqCreated(address indexed _sender, uint256 indexed _requstid);
     event NewRequestExecuted(uint256 indexed _requstid);
@@ -259,6 +259,21 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     // retrieve user's account information
     function getUserInfo() external onlyContractValid view returns (Account memory) {
         return accounts[msg.sender];
+    }
+
+    // retrieve challenge record
+    function getChallengeRcd(uint256 idx) external onlyContractValid view returns (ChallengeRequestRcd memory) {
+        return challengeRcds[idx];
+    }
+
+    // retrieve check record
+    function getCheckRcd(bytes32 idx) external onlyContractValid view returns (CheckReq memory) {
+        return checkRcds[idx];
+    }
+
+    // retrieve user's funds
+    function checkFund() external onlyContractValid view returns (uint256) {
+        return funds[msg.sender];
     }
 
     // create order based on user's request. 
@@ -623,7 +638,7 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
         curCert.expires = curOrder.expires;
         curCert.identifiers = curOrder.identifiers;
         curCert.notBefore = curOrder.notBefore;
-        curCert.notAfter = curCert.notAfter;
+        curCert.notAfter = curOrder.notAfter;
         curCert.hash = hash;
         curCert.status = Status.valid;
         curCert.owner = msg.sender;
