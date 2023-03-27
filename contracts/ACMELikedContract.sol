@@ -215,7 +215,8 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
      * constructor
      *
      */
-    constructor() VRFV2WrapperConsumerBase(linkAddress, wrapperAddress) {
+    constructor(string memory termOfServiceLink) VRFV2WrapperConsumerBase(linkAddress, wrapperAddress) {
+        termOfService = termOfServiceLink;
         owner = msg.sender;
         contractValid = true;
         setChainlinkToken(linkAddress);
@@ -274,6 +275,11 @@ contract CertCoordinator is ChainlinkClient, ACMEDataFormat, VRFV2WrapperConsume
     // retrieve user's funds
     function checkFund() external onlyContractValid view returns (uint256) {
         return funds[msg.sender];
+    }
+
+    // retrieve certificate
+    function getCert(uint256 cerIdx) external onlyContractValid view returns (Certificate memory) {
+        return CertRcds[cerIdx];
     }
 
     // create order based on user's request. 
